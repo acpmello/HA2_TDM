@@ -1,0 +1,6 @@
+book_filename: "HA2_TDM"
+delete_merged_file: false
+output_dir: "_book"
+language:
+  ui:
+    chapter_name: ""

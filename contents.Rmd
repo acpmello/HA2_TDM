@@ -1,0 +1,1399 @@
+---
+bibliography: references.bib
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+
+library(bestglm)
+library(car)
+library(cluster)
+library(corrplot)
+library(countreg)
+library(data.table)
+library(dplyr)
+library(factoextra)
+library(ggplot2)
+library(ggResidpanel)
+library(gridExtra)
+library(Hmisc)
+library(jtools)
+library(kableExtra)
+library(knitr)
+library(magrittr)
+library(MASS)
+library(mctest)
+library(modelsummary)
+library(NbClust)
+library(openxlsx)
+library(performance)
+library(olsrr)
+library(outliers)
+library(pastecs)
+library(performance)
+library(popbio)
+library(pscl)
+library(psych)
+library(qcc)
+library(radiant.multivariate)
+library(reshape2)
+library(rcompanion)
+library(robust)
+library(scales)
+library(sjlabelled)
+library(sjmisc)
+library(sjPlot)
+library(sjtable2df)
+library(stats)
+library(tidyverse)
+library(vcd)
+library(vtable)
+
+knitr::opts_chunk$set(cache=TRUE, 
+                      echo=FALSE, 
+                      message=FALSE, 
+                      error=FALSE, 
+                      warning=FALSE, 
+                      comment = NA,
+                      fig.path='figs/',
+                      cache.path = '_cache/',
+                      fig.pos='H', out.extra = "",
+                      fig.process = function(x) {
+                      x2 = sub('-\\d+([.][a-z]+)$', '\\1', x)
+                      if (file.rename(x, x2)) x2 else x},
+                      tab.cap.style = "Table Caption",
+                      tab.cap.pre = "Table ",
+                      tab.cap.sep = ". "
+                    )
+
+#Table output
+options(knitr.table.format = function() {
+  if (knitr::is_latex_output())
+    "latex" else "pipe"
+})
+
+
+#function to make scatterplot points transparent
+t_col <- function(color, opacity = 0.5) {
+  rgb.val <- col2rgb(color)
+  t.col <- rgb(rgb.val[1], rgb.val[2], rgb.val[3], max = 255, alpha = (opacity)*255)
+  invisible(t.col)
+}
+
+#Function to change bw theme's text labels                     
+theme_custom <- function(){
+  theme_bw() %+replace%  
+  theme(
+    plot.caption = element_text(size = 8,hjust = 1),
+    axis.title = element_text(size = 8),
+    axis.text = element_text(size = 6),
+    plot.title=element_text(hjust=0.5,size=10,vjust = 2),
+    plot.margin = unit(c(0.2, 0, 0, 0), "cm")
+    )
+}
+
+#Function to separate outputs with a line
+BreakLine <- function () {cat("","\n", "_________________________________________________________________________","","\n")
+}
+
+#Function to get p-value of Anova
+pvalue <- function(null, test) {
+          pchisq(deviance(null) - deviance(test),       
+                 df.residual(null) - df.residual(test), 
+                 lower.tail = FALSE)
+}
+
+#changes to geom default colors
+update_geom_defaults("point", list(color = t_col("dark grey")))
+update_geom_defaults("bar", list(fill = "dark grey", color = "dark grey"))
+update_geom_defaults("line", list(fill = "dark grey", color = "dark grey"))
+update_geom_defaults("smooth", list(fill = "dark grey", color = "dark grey"))
+update_geom_defaults("abline", list(fill = "#89f0f4", color = "#89f0f4"))
+update_geom_defaults("spoke", list(fill = "dark grey", color = "dark grey"))
+update_geom_defaults("segment", list(fill = "dark grey", color = "dark grey"))
+update_geom_defaults("density", list(fill = "dark grey", color = "dark grey"))
+
+```
+
+# Introduction
+
+The purpose of this report is to describe and discuss cause and effect relationships between the number of accidents in Portuguese highways and 11 explanatory variables and present and discuss linear models that best reflect these relationships.
+
+## Dataset
+
+This report is based on a subset sample of a data on 157 road sections from highways longer than 1km between 1996 and 2002. The original research was the doctoral thesis of Ana Capote: a simulation of traffic behavior in Portugal roads taking into consideration the influence of friction in pavements surfaces \@[@capote2009] .
+
+## Variables
+
+The dataset includes data on 11 explanatory variables listed below (each an independent variable or IV):
+
+(1) ACC_TRAFFIC- Accumulated Annual Average Daily Traffic (10^6^ vehicles).
+
+(2) AVG_RAIN - Average annual precipitation in millimeters.
+
+(3) AVG_SPEED - Average speed.
+
+(4) AVG_TRAFFIC - Average daily traffic.
+
+(5) CDR - Class of the most unfavorable curve radius in the segment.
+
+(6) CI - Longitudinal inclination class.
+
+(7) CURVES - Length in meters of the segment with curves.
+
+(8) IFI - International friction index.
+
+(9) P_CROSS - Percentage of the segment's length under the influence of intersections.
+
+(10) P_HEAV - Percentage of heavy vehicles.
+
+(11) P_URB- Percentage of the segment's length in an urban area.
+
+## A priori knowledge
+
+The scope of this report is supported by the need to ensure road safety and to reduce the damage and/or loss of life. According to a World Health Organization (WHO), road crashes are one of the leading causes of death and severe injuries. They recently announced ''Decade of Action for Road Safety 2021--2030'', setting an ambitious target of preventing at least 50% of road traffic deaths and injuries by 2030 [@who2022]. Due to its importance, road safety has been a major focus for transport engineers, policymakers, and researchers.
+
+Road accidents are influenced by a myriad of factors. Very rarely one factor alone can be singled out as the sole cause of an accident. Most times, the factor perceived as the accident cause is only the critical reason for its occurrence, that is, the last failure in the chain of events that led to it.
+
+Some factors are known to influence road accidents. They may be separated into static and dynamic. The geometry of the road and pavement specifications are examples of static factors. Weather conditions, road worthiness, road worthiness of the vehicle, driver's behavior, and other road user's (i.e. cyclists, pedestrians) behavior are dynamic factors.
+
+*IFI*. IFI is an index that mesures pavement friction. A pavement's skid resistance will determine, among other things, the speed limit of the road. We would expect a higher IFI in highways where the speed limit is higher and a lower IFI in small urban streets.
+
+*ACC_TRAFFIC*. Road worthiness is a dynamic factor influenced by IFI. Skid resistance is constantly monitored to identify roads in need of resurfacing. Intense traffic reduces skid resistance over time. Roads with higher traffic volume are more vulnerable to losses in road worthiness.
+
+*CURVES and CDR* . Curves may influence accident rate but its impact is not straightforward. A great number of horizontal curves is correlated with single-vehicle accident rate [@al-masaeid1997]. Drivers have an expectation of speed limit that might not be met by the actual curve design. "Horizontal curves whose design speeds are less than drivers' desired speed on long tangents exhibit operating-speed inconsistencies that increase accident potential." [@fink1995]
+
+*CI*. Longitudinal inclination affects the minimum sight distance necessary for safe operation and can possibly hide view of other geometric hazards. Similarly to curves, impact of longitudinal inclination is not straight forward. "Accident rate increases with average vertical gradient exponentially" [@fu2011], not linearly. So length of the gradient segment is relevant. The number of vertical curves is associated with an increased rate of accidents involving multiple vehicles [@al-masaeid1997], so traffic and longitudinal inclination should interact.
+
+*P_CROSS*. Intersections are expected to be important predictors of accident rate. There is a great body of literature on the association of intersection and accidents. Illustratively, "in 2008 the National Highway Traffic Safety Administration (NHTSA) indicated that 56 percent of the 37,261 fatalities on U.S. roadways occurred in rural areas. This figure is disproportionate since only 23 percent of Americans live in rural areas and rural roadways account for just 40 percent all vehicle miles traveled nationally." [@fha2011] This is attributed to the fact that "many local rural intersections lack suitable design standards, delineation, and signing that may be provided on higher volume roadways." [@fha2011]
+
+*AVG_RAIN*. Weather conditions may affect skid resistance and visibility. In Portugal, the most important weather condition associated with road safety is precipitation. Rain was present in 13.8% of the accident occurrences in 2021 [@ansr2021].
+
+*P_HEAV*. Heavy vehicles were involved in only 2.7% of the accidents only in Portugal in 2021[@ansr2021]. Trucks typically have speed limitations embedded in their systems because they need more space to maneuver and because their blind spots are larger. Even though we do not expect a high accident rate involving heavy vehicles, we would expect a higher percentage of fatalities because of the higher kinetic energy they contribute to the crash.
+
+*P_URB and AVG_TRAFFIC*. Driving behavior is an important contributor to road accidents. Urban environments or a intense traffic introduce complexity to driver's response and increased risk of recognition errors. In the United States of America, research has shown that recognition errors are the predominant critical accident reason accounted to drivers in accidents within school, business and moderate residential areas[@khattak2021]. Consistently, in Portugal, in 2021, most accidents occurred in urban streets[@ansr2021]. Following the same logic, "while there is a near-proportional relationship at low to moderate traffic flows, the marginal accident rate rises substantially above the average rate at higher traffic flows"[@dickerson2000].
+
+*AVG_SPEED*. Speed is inherent to the act of driving, but speeds higher than recommended may contribute to decreased skid resistance or increased risk of recognition or decision error. Literature review of existing research found that[@aarts2006]:
+
+-   At any particular segment, higher driving speeds are associated with higher accident rates.
+
+-   Actual road and traffic characteristics mediate accident risks by their effect on speed and directly.
+
+-   Accident rates increase faster with an increase of speed at roads designed for lower speed than at roads designed for higher speed.
+
+-   High speed variances in a 24 hour-period are associated with higher accident rates.
+
+```{r BuildDataframes, include=FALSE}
+
+df <- read.xlsx("Data/data.xlsx")
+names(df) <- c("DV", "IFI", "AVG_TRAFFIC", "P_HEAV", "AVG_SPEED", "P_URB", "P_CROSS", "CURVES", "CDR", "CI", "AVG_RAIN", "ACC_TRAFFIC")
+df <- df[, c(1,11,5,12,3,8,2,7,4,6,10,9)] 
+
+df$CI <- factor(df$CI,
+            levels = c(0, 1),
+            labels = c("gradient", "mix"),
+            )
+
+df$CDR <- factor(df$CDR,
+            levels = c(0,1,2,3,4),
+            )
+```
+
+# Exploratory Data Analysis
+
+The dataset has 1 DV, 9 continuous and 2 categorical IVs (Table \@ref(tab:SummaryStatistics)), Neither the DV, nor any of the continuous IVs are normally distributed (Figure \@ref(fig:ScatterplotsMatrix)).
+
+```{r vtable, include=FALSE}
+vtable(df)
+```
+
+```{r SummaryStatistics, results= "asis", comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+descstat <- st(df[1:12], fit.page=TRUE, out="return")
+descstat$N <- as.numeric(descstat$N)
+descstat$Mean <- as.numeric(descstat$Mean)
+descstat$`Std. Dev.` <- as.numeric(descstat$`Std. Dev.`)
+descstat$Min <- as.numeric(descstat$Min)
+descstat$`Pctl. 25` <- as.numeric(descstat$`Pctl. 25`)
+descstat$`Pctl. 75` <- as.numeric(descstat$`Pctl. 75`)
+descstat$Max <- as.numeric(descstat$Max)
+
+descstat %>%
+  kable(caption = "Summary Statistics", 
+        format="html", 
+        table.attr="style='width:90%;'", 
+        align="lrrrrrrr", 
+        digits=2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), font_size=10, full_width = FALSE) 
+
+```
+
+```{r zeros, include=FALSE}
+
+zeros <- data.frame(colSums(df==0)/(nrow(df))*100)
+zeros <- cbind(rownames(zeros), data.frame(zeros, row.names=NULL))
+
+zeros %>%
+  kable(caption="% of zeros",
+        format="html",
+        table.attr="style='width:90%;'", 
+        align="lr",
+        col.names=c("Variable", "%"),
+        digits=2) %>%
+  kable_styling(
+                bootstrap_options = c("striped", "hover", "condensed"), 
+                font_size=10, 
+                full_width = FALSE)
+```
+
+## Dependent variable
+
+The dependent variable is a discrete response of counts. It is not normally distributed and it is right skewed (Figure \@ref(fig:DVHistogram)). We rejected the null hypothesis that the DV has a Poisson distribution based on its high coefficient of variance (11.5) and the significance of its goodness of fit test for Poisson distribution (χ2(20)=784, p-value\<.01).
+
+```{r DVgofPoisson, include=FALSE}
+
+gf_poisson_DV<-goodfit(df$DV,  type= "poisson", method= "ML") 
+summary(gf_poisson_DV)
+```
+
+```{r DVCoefVariance, include=FALSE}
+
+a <- var(df$DV)/mean(df$DV)
+cat("Coefficient of variance of DV is:", a)
+```
+
+```{r DVHistogram, fig.cap="DV Histogram and density plot", fig.topcaption=TRUE, fig.cap.style="Figure Caption", fig.align="center", fig.show="hold", out.width="50%", comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+ 
+ggplot(data=df, aes(DV))+
+                  geom_histogram(aes(y = ..density..))+
+                  geom_density(color = "dark grey", linetype="dashed", fill = "#89f0f4", alpha = 0.6)+
+                  theme_custom()
+```
+
+## Categorical Variables
+
+The categorical variables' boxplots (Figure \@ref(fig:CategoricalBoxplots)) show modest variations in the means of the DV among the different categories' levels .
+
+```{r CategoricalBoxplots, fig.cap="Boxplots of Categorical IVs", fig.topcaption=TRUE, fig.cap.style="Image Caption", fig.align="center", fig.show="hold", out.height="70%", out.width="70%", results='asis', comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+grid.arrange (
+  
+    ggplot(df, aes(x=DV, y=CDR)) + 
+    geom_boxplot(outlier.colour="red",outlier.shape=8,outlier.size=4)+
+    coord_flip() +   
+    theme_custom(),
+
+  NULL,
+  
+  ggplot(df, aes(x=DV, y=CI)) + 
+    geom_boxplot(outlier.colour="red",outlier.shape=8,outlier.size=4)+
+    coord_flip()+
+    theme_custom(),
+  
+  NULL,
+  
+  ncol=4, 
+  widths=c(1,0.1,1,0.1)
+)
+```
+
+## Continuous Variables
+
+We have examined the bivariate relationship between the DV and each of the continuous IVs (Figure \@ref(fig:ScatterplotsMatrix)). IFI is the independent variable with the most linear relationship with DV.
+
+```{r ScatterplotsMatrix, fig.cap="Scatterplots and Histograms of Independent Variables", fig.topcaption=TRUE, fig.cap.style="Image Caption", fig.align="center", fig.show="hold", out.width="100%", results='asis', comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+grid.arrange(
+             ggplot(df, aes(x=AVG_RAIN,y=DV)) +
+                        geom_point(size=1) +
+                        labs(x="AVG_RAIN", y= "DV")+
+                        theme_custom()+
+                        geom_smooth(method=lm,se=TRUE, color="dark grey"),
+              
+              ggplot(df, aes(AVG_RAIN))+
+                        geom_histogram(aes(y = ..density..))+
+                        geom_density(color = "dark grey", linetype="dashed", fill = "#89f0f4", alpha = 0.6)+
+                        theme_custom(),
+
+              ggplot(df, aes(x=AVG_SPEED,y=DV)) +
+                        geom_point() +
+                        labs(x="AVG_SPEED", y= "DV")+
+                        theme_custom()+
+                        geom_smooth(method=lm,se=TRUE, color="#89f0f4"),
+              
+              ggplot(df, aes(AVG_SPEED))+
+                        geom_histogram(aes(y = ..density..))+
+                        geom_density(color = "dark grey", linetype="dashed", fill = "#89f0f4", alpha = 0.6)+
+                        theme_custom(),
+
+              ggplot(df, aes(x=ACC_TRAFFIC,y=DV)) +
+                        geom_point() +
+                        labs(x="ACC_TRAFFIC", y= "DV")+
+                        theme_custom()+
+                        geom_smooth(method=lm,se=TRUE, color="#89f0f4"),
+              
+              ggplot(df, aes(ACC_TRAFFIC))+
+                        geom_histogram(aes(y = ..density..))+
+                        geom_density(color = "dark grey", linetype="dashed", fill = "#89f0f4", alpha = 0.6)+
+                        theme_custom(),
+
+             ggplot(df, aes(x=AVG_TRAFFIC, y=DV)) +
+                        geom_point() +
+                        labs(x="AVG_TRAFFIC", y= "DV")+
+                        theme_custom()+
+                        geom_smooth(method=lm,se=TRUE, color="#89f0f4"),
+              
+              ggplot(df, aes(AVG_TRAFFIC))+
+                        geom_histogram(aes(y = ..density..))+
+                        geom_density(color = "dark grey", linetype="dashed", fill = "#89f0f4", alpha = 0.6)+
+                        theme_custom(),
+
+             ggplot(df, aes(x=CURVES,y=DV)) +
+                        geom_point() +
+                        labs(x="CURVES", y= "DV")+
+                        theme_custom()+
+                        geom_smooth(method=lm,se=TRUE, color="#89f0f4"),
+              
+              ggplot(df, aes(CURVES))+
+                        geom_histogram(aes(y = ..density..))+
+                        geom_density(color = "dark grey", linetype="dashed", fill = "#89f0f4", alpha = 0.6)+
+                        theme_custom(),
+             
+             ggplot(df, aes(x=IFI,y=DV)) +
+                        geom_point() +
+                        labs( x="IFI", y= "DV")+
+                        theme_custom()+
+                        geom_smooth(method=lm,se=TRUE, color="#89f0f4"),
+              
+              ggplot(df, aes(IFI))+
+                        geom_histogram(aes(y = ..density..))+
+                        geom_density(color = "dark grey", linetype="dashed", fill = "#89f0f4", alpha = 0.6)+
+                        theme_custom(),
+
+             ggplot(df, aes(x=P_CROSS,y=DV)) +
+                        geom_point() +
+                        labs(x="P_CROSS", y= "atrip")+
+                        theme_custom()+
+                        geom_smooth(method=lm,se=TRUE, color="#89f0f4"),
+              
+              ggplot(df, aes(P_CROSS))+
+                        geom_histogram(aes(y = ..density..))+
+                        geom_density(color = "dark grey", linetype="dashed", fill = "#89f0f4", alpha = 0.6)+
+                        theme_custom(),
+
+             ggplot(df, aes(x=P_HEAV,y=DV)) +
+                        geom_point() +
+                        labs(x="P_HEAV", y= "DV")+
+                        theme_custom()+
+                        geom_smooth(method=lm,se=TRUE, color="#89f0f4"),
+              
+              ggplot(df, aes(P_HEAV))+
+                        geom_histogram(aes(y = ..density..))+
+                        geom_density(color = "dark grey", linetype="dashed", fill = "#89f0f4", alpha = 0.6)+
+                        theme_custom(),   
+
+              ggplot(df, aes(x=P_URB,y=DV)) +
+                        geom_point() +
+                        labs(x="P_URB", y= "DV")+
+                        theme_custom()+
+                        geom_smooth(method=lm,se=TRUE, color="#89f0f4"),
+              
+              ggplot(df, aes(P_URB))+
+                        geom_histogram(aes(y = ..density..))+
+                        geom_density(color = "dark grey", linetype="dashed", fill = "#89f0f4", alpha = 0.6)+
+                        theme_custom(),              
+                                        
+              ncol=4, 
+              widths=c(1,1,1,1)
+)
+```
+
+```{r BoxplotsDF, include=FALSE}
+
+df.m <- as.data.frame(scale(df[1:10], center=TRUE, scale=TRUE))
+df.m$Scaled.Variables <- seq.int(nrow(df.m))
+df.m <- melt(df.m, id.vars='Scaled.Variables', measure.vars=c("DV", "AVG_RAIN", "AVG_SPEED",  "ACC_TRAFFIC", "AVG_TRAFFIC", "CURVES", "IFI",  "P_CROSS", "P_HEAV", "P_URB"))
+names(df.m) <- c("Scaled.Variables", "Scaled.Variable", "Value")
+```
+
+```{r BoxplotsMatrix, fig.cap="Scaled Variables Boxplots", fig.topcaption=TRUE, fig.cap.style="Image Caption", fig.align="center", fig.show="hold", out.width="70%", results='asis', include=FALSE}
+
+ggplot(df.m) +
+      geom_boxplot(aes(x=Scaled.Variables, y=Value, color=Scaled.Variable))+
+      theme_custom()
+```
+
+## Correlation
+
+Because most variables do not have a linear relationship with each other or with the DV, we have examined the correlation matrix of the variables under the Spearman method (Tables \@ref(tab:rhoMatrix) and \@ref(tab:pvalueMatrix)).
+
+```{r rhoMatrix, results='asis', comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+df.corr <- as.matrix(subset(df, select=c(1:10)))
+corrmat <- (rcorr(df.corr, type=c("spearman")))
+r.corr <- data.frame(unclass(corrmat$r))
+P.corr <- data.frame(unclass(corrmat$P))
+
+r.corr %>%
+  kable(caption = "rho - Spearman Correlation Matrix", 
+        format="html", 
+        table.attr="style='width:60%;'", 
+        align="lrrrrrrr", 
+        digits=2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), font_size=9, full_width = FALSE) 
+```
+
+```{r pvalueMatrix, results='asis', comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+P.corr %>%
+  kable(caption = "pvalues - Spearman Correlation Matrix", 
+        format="html", 
+        table.attr="style='width:60%;'", 
+        align="lrrrrrrr", 
+        digits=2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), font_size=9, full_width = FALSE) 
+```
+
+-   Average Daily Traffic (AVG_TRAFFIC) and Accumulated Annual Average Daily Traffic (ACC_TRAFFIC) are significantly and highly correlated (Spearman Correlation Rate =1, p.value\<.01).
+
+-   IFI is significantly and moderately correlated with AVG_RAIN (Spearman Correlation Rate = --.49, p.value\<.01), with AVG_SPEED (Spearman Correlation Rate = .66, p.value\<.01), with P_CROSS (Spearman Correlation Rate = -.30, p.value\<.01), and with P_URB (Spearman Correlation Rate = -.45, p.value\<.01).
+
+-   AVG_SPEED is significantly and moderately correlated with P_URB (Spearman Correlation Rate = -.47, p.value\<.01), and AVG_RAIN (Spearman Correlation Rate = -.31, p.value\<.01).
+
+-   AVG_TRAFFIC is significantly and moderately correlated with AVG_RAIN (Spearman Correlation Rate = -.36, p.value\<.01) and with P_HEAV (Spearman Correlation Rate = -.30, p.value\<.01).
+
+## Collinearity
+
+AVG_TRAFFIC and ACC_TRAFFIC are highly correlated and we have to choose one of the variables to keep in the dataset. Keeping AVG_TRAFFIC results in better multicollinearity measures (Figure \@ref(collinearity)).
+
+```{r Collinearity, echo=FALSE, message=FALSE, warning=FALSE}
+
+#omcdiag(restricted_1)
+#igprop(restricted_1)
+
+df.coll <- subset(df, select=c(1:12))
+
+df.coll1 <- subset(df.coll, select=-c(ACC_TRAFFIC))
+mod.coll1 <- glm.nb(DV~., df.coll1)
+coll1 <- imcdiag(mod.coll1)
+coll1 <- data.frame(unclass(coll1$idiags))
+coll1 <- subset(coll1, select=-c(TOL, Wi, Fi, Klein, Leamer, IND1, IND2))
+
+df.coll2 <- subset(df.coll, select=-c(AVG_TRAFFIC))
+mod.coll2 <- glm.nb(DV~., df.coll2)
+coll2 <- imcdiag(mod.coll2)
+coll2 <- data.frame(unclass(coll2$idiags))
+coll2 <- subset(coll2, select=-c(TOL, Wi, Fi, Klein, Leamer, IND1, IND2))
+
+kable(list(coll1, coll2), 
+        caption = "Multicollinearity Diagnostic", 
+        format="html", 
+        table.attr="style='width:90%;'", 
+        align="lrrr", 
+        digits=2,
+        padding="12em") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                font_size=10, 
+                full_width = FALSE)
+```
+
+# Cluster Analysis
+
+Cluster analysis was performed using Euclidean distance and Ward's method. The dataset was clustered into four clusters, with an average silhouette width of .35 (Figure \@ref(fig:Silhouette)).
+
+```{r ClusteringPrep, include=FALSE}
+
+#Remove Categorical 
+df.cluster <-as.data.frame(df[,1:10])
+df.cluster <- scale(df.cluster)
+n <- 4
+
+distance        <- get_dist(df.cluster, stand = TRUE, method = "euclidean")
+model.ward      <- hclust(distance, "ward.D2")
+
+### Elbow method (look at the knee)
+# Elbow method for kmeans
+#fviz_nbclust(df.cluster, kmeans, method = "silhouette") +
+#geom_vline(xintercept = 3, linetype = 2)
+
+#Inputs
+km <- hkmeans(
+  df.cluster,
+  n,
+  hc.metric = "euclidean",
+  hc.method = "ward.D2",
+  iter.max = 10,
+  km.algorithm = "Hartigan-Wong"
+)
+hc.cut <- hcut(df.cluster, 
+               k = n, 
+               hc_method = "ward.D2")
+```
+
+```{r Dendogram, fig.cap="Dendogram",  fig.cap.style="Image Caption", fig.align="center", fig.show="hold", out.width="70%", results='asis', include=FALSE}
+
+#Dendogram
+fviz_dend(hc.cut, # Cut in n groups
+          cex = 0.5, # label size
+          k_colors = c("#2E9FDF", "#00AFBB", "#E7B800", "#FC4E07"),
+          color_labels_by_k = TRUE, # color labels by groups
+          rect = TRUE # Add rectangle around groups
+          )
+```
+
+```{r Silhouette, fig.cap="Silhouette Plot",  fig.cap.style="Image Caption", fig.align="center", fig.show="hold", out.width="65%", results='asis', comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+#Silhouette
+require("cluster")
+sil <- silhouette(km$cluster, dist(df.cluster))
+fviz_silhouette(sil,
+                k_colors = c("#2E9FDF", "#00AFBB", "#E7B800", "#FC4E07"), 
+                print.summary=FALSE)
+```
+
+```{r Kmeans, comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+kSUM <- df[1:10] %>%
+  mutate(Cluster = km$cluster) %>%
+  group_by(Cluster) %>%
+  summarise_all("mean")
+
+kSUM %>%
+  kable(caption = "Clusters Means Summary", format="html", table.attr="style='width:90%;'", align="lrrrrrrrrrr", digits=2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                font_size=11, 
+                full_width = FALSE)
+```
+
+```{r ClusterPLot, fig.cap="Cluster Plot",  fig.cap.style="Image Caption", fig.align="center", fig.show="hold", out.width="70%", results='asis', comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+#Cluster Plot
+fviz_cluster(km, data = df.cluster,
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal())
+```
+
+Cluster 2 is the largest. Cluster 1 is a small subset of Cluster 2 comprised of observations inserted in urban segments. It has a higher mean of percentage of urban segments (P_URB) than Cluster 2. It is distinct in that it has above average means of average precipitation (AVG_RAIN) and average daily traffic (AVG_TRAFFIC) and below average means of average speed (AVG_SPEED).
+
+Clusters 3 and 4 (Figure \@ref(fig:ClusterPLot)) are distinct in that Cluster 4 has the lowest count of accidents and Cluster 3 the highest (Table \@ref(tab:Kmeans)):
+
+-   Cluster 3 has characteristics of ***predominantly urban segments***. It has above average means of percentage of segments' length in urban areas (P_URB) and average daily traffic (AVG_TRAFFIC).
+
+-   Cluster 4 has characteristics of ***highway segments***. It has an above average percentage of average daily traffic (AVG_TRAFFIC), a below average mean of percentage of segments' length in urban areas (P_URB), and above average means of average speed (AVG_SPEED) and international friction index (IFI).
+
+Interestingly, even though Cluster 4 has the lowest count of accidents and a high average daily traffic, it has an above average means of length of curves (CURVES) and a distinctly above average means of annual precipitation (AVG_RAIN). This finding suggests that th curves and precipitation may not be an important predictor of the accident rate. As to precipitation, [@capote2009] suggests that this result might be explained by the familiarity of drivers of rainy areas with the prevalent weather conditions. She suggests these drivers more skillfully adjust speed to loss of friction.
+
+# Models
+
+```{r interceptonly, include=FALSE}
+
+interceptonly <- glm.nb(DV~offset(log(ACC_TRAFFIC)), df)
+```
+
+Number of road accidents is a count variable influenced by a series of factors, as discussed above. Intensity of traffic may influence the number of road accidents, but, more importantly, it represents the level of exposure to the risk of such accidents. Hence, in modelling road accidents, it is more important to model a rate of accidents per traffic than the count per se. To that effect, all models presented below each have traffic offset variables.
+
+## Model 1
+
+### Fit
+
+A negative binomial regression was performed to ascertain the effects of the friction as measured by the International Friction Index (IFI) on the number of road accidents (DV) per average daily traffic (AVG_TRAFFIC) on Portuguese road sections from highways longer than 1km between 1996 and 2002.
+
+We have examined the nine possible outliers with standardized deviance residuals greater than 2 (Figure \@ref(fig:DeviancePlot1)) and removed each of them sequentially. Seven observations (8, 60, 69, 70, 90, 95, and 140) were identified as outliers (Table \@ref(tab:Outliers1)) and removed from the dataset.
+
+The regression model was statistically significant, χ2 (1, N = 150) = 132.54, p \< .01. All predictors were significant to the model (Table \@ref(tab:anova1)).
+
+For every unit increase in a road segment IFI, its rate for number of accidents per average daily traffic was expected to decrease by a factor of 0.92, while holding all other variables in the model constant (Table \@ref(tab:sumModel1)). In terms of elasticity, for every percentage point increase in IFI, its rate of accidents per average daily traffic was expected to decrease by 47.32%, while holding all other variables in the model constant.
+
+```{r Model1, include=FALSE}
+
+model1 <- glm.nb(DV ~ offset(log(AVG_TRAFFIC))+IFI, df)
+
+sum1 <- tab_model(model1, show.r2=FALSE)
+sum1 <- mtab2df(sum1,
+  n_models = 1,
+  output = "data.frame")
+sum1 %>%
+  kable(caption = "Model 1", format="html", table.attr="style='width:90%;'", align="lrrr", digits=2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), font_size=11, full_width = FALSE)
+
+```
+
+```{r Model1f, include=FALSE}
+
+df.filtered1 <- df[-c(69,140,8,95,60,90,70), ]
+model1f <- glm.nb(DV ~ offset(log(AVG_TRAFFIC))+IFI, df.filtered1)
+```
+
+```{r sumModel1,comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+sum1f <- tab_model(model1f, show.r2=FALSE)
+sum1f <- mtab2df(sum1f,
+  n_models = 1,
+  output = "data.frame")
+
+SUM1 <- kable(sum1f,
+      caption = "Summary Model 1", 
+      format="html", 
+      table.attr="style='width:90%;'", 
+      align="lrrr", 
+      digits=2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                font_size=11, 
+                full_width = FALSE,
+                position="float_left") 
+```
+
+```{r omnibus1, include=FALSE}
+
+nagelkerke(model1f)
+```
+
+```{r elasticity1, include=FALSE}
+
+elasticity1 <- (model1f$coefficients["IFI"] * 100 * mean(df.filtered1$IFI)/mean(df.filtered1$DV))
+cat("For each percentage increase in IFI, number of accidents per accumulated traffic changes by ", elasticity1,"%.", "\n")
+```
+
+```{r anova1, comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+#Anova(model1f, type="III", test="Wald")
+
+l2 <- c("(Intercept)", 1, 849.613, "< 2.2e-16")
+l3 <- c("IFI", 1, 95.887, "< 2.2e-16")
+Anova1 <- rbind(l2, l3)
+rownames(Anova1) <- NULL
+colnames(Anova1) <- c(" ", "Df", "Chisq", "Pr(>Chisq)")
+ANOVA1 <- kable(Anova1, 
+        caption = "Analysis of Deviance Table (Type III tests) - Model 1", 
+        format="html", 
+        table.attr="style='width:90%;'", 
+        align="lrrr", 
+        digits=2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                font_size=11, 
+                full_width = FALSE,
+                position="float_right")
+```
+
+```{r sidebyside1, includ=FALSE}
+
+kables(list(SUM1, ANOVA1)) %>% kable_styling(bootstrap_options = c("striped", "hover", "condensed"), font_size=11, full_width = FALSE, position = "float_left")
+```
+
+### Outliers
+
+We have identified possible outliers to the model following Joseph Hilbe's method and code [@hilbe2011], that is, those observations whose deviance residuals are greater than 2 (Figure \@ref(fig:DeviancePlot1)). We have identified nine observations with standardized deviance residuals greater than 2, respectively in Table \@ref(tab:Outliers1).
+
+```{r DeviancePlot1, fig.cap="Standardized Deviance Residuals-Model 1",  fig.cap.style="Image Caption", fig.align="center", fig.show="hold", out.width="70%", results='asis', comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+deviance1 <- residuals(model1, type="deviance")
+dev1 <- sum(deviance1*deviance1)
+pred1 <- predict(model1, se.fit=TRUE, type="response")
+mu1 <- pred1$fit
+mu1 <- 2*sqrt(mu1)
+stdp1 <- pred1$se.fit # Std error of prediction
+variance1 <- mu1
+h1 <- stdp1 * stdp1*variance1
+sdeviance1 <- rstandard(model1) # Std dev
+plot(mu1, sdeviance1,
+     xlab="2 * sqrt mu", ylab="Standardized Deviance Residuals - Model 1",
+     main="Outliers - Model 1",
+     ylim = c(-3, 3)) 
+abline(h=2, col='red')
+abline(h=-2, col='red')
+```
+
+```{r Outliers1, comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+outliers1             <- cbind(df, sdeviance1)
+outliers1$sdeviance1  <- abs(outliers1$sdeviance1)
+outliers1             <- cbind(rownames(outliers1), outliers1)
+setnames(outliers1, "rownames(outliers1)", "Observation")
+
+influential1a <- filter(outliers1, outliers1$sdeviance1>2)
+influential1a <- subset(influential1a, select =c("sdeviance1", "DV", "IFI","AVG_TRAFFIC", "Observation"))
+influential1a <- influential1a[order(influential1a$sdeviance1, influential1a$DV, decreasing=TRUE),]
+names(influential1a) <- c("Standardized Deviance", "Number of Accidents", "IFI", "AVG_TRAFFIC", "Observation" )
+rownames(influential1a) <- NULL
+
+kable(influential1a, 
+        caption = "Outliers - Model 1", 
+        format="html", 
+        table.attr="style='width:70%;'", 
+        align="rrrrr", 
+        digits=2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                font_size=11,
+                full_width = FALSE)%>%
+  column_spec(1:5, width = "2em")
+```
+
+### Goodness of Fit
+
+Considering Model 1 is a negative binomial fit, none of its goodness of fit measures *minimization of* *variance*, but rather *proportional* *reduction in the absolute value of the log-likelihood measure*. As per the measures listed in Table \@ref(tab:gof1), Model 1 is a much better fit than the intercept-only model: its log likelihood is closer to zero and its AIC and BIC are lower than those of the intercept-only model.
+
+The impact of outliers was substantial and their removal significantly improved the model bringing log-likelihood closer to zero, further reduced AIC and BIC measures and increased Nagelkerke R^2^ of .59 (Table \@ref(tab:gof1)).
+
+```{r PrepGoodnessFit1, include=FALSE}
+
+gof_caption <- c("Measure", "Intercept Only", "Model 1 with Outliers", "Model 1 without Outliers")
+
+z0_nb           <- check_zeroinflation(interceptonly)
+z1_nb           <- check_zeroinflation(model1)
+z1f_nb          <- check_zeroinflation(model1f)
+zeroinflation1  <- c("Zero Inflation Rate", z0_nb$ratio, z1_nb$ratio, z1f_nb$ratio)
+
+p0_nb <- pR2(interceptonly)
+p1_nb <- pR2(model1)
+p1f_nb <- pR2(model1f)
+
+llh1  <- c("llh", p0_nb[1], p1_nb[1], p1f_nb[1])
+
+aic0_nb <- AIC(interceptonly)
+aic1_nb <- AIC(model1)
+aic1f_nb<- AIC(model1f)
+aic1    <- c("AIC", aic0_nb, aic1_nb, aic1f_nb)
+
+bic0_nb <- BIC(interceptonly)
+bic1_nb <- BIC(model1)
+bic1f_nb<- BIC(model1f)
+bic1    <- c("BIC", bic0_nb, bic1_nb, bic1f_nb)
+
+McFadden1   <-  c("McFadden", p0_nb[4], p1_nb[4], p1f_nb[4])
+CoxSnell1   <-  c("Cox & Snell", p0_nb[5], p1_nb[5], p1f_nb[5])
+Nagelkerke1 <-  c("Nagelkerke", p0_nb[6], p1_nb[6], p1f_nb[6])
+header.true <-  function(df) {
+                names(df) <-  as.character(unlist(df[1,]))
+                df[-1,]
+}
+
+gof_1           <- data.frame(gof_caption, zeroinflation1, llh1, aic1, bic1, McFadden1, CoxSnell1, Nagelkerke1)#Create table
+gof_1           <- t(gof_1)#Transpose
+gof_1           <- as.data.frame(gof_1)#Convert to dataframe
+names(gof_1)    <- as.character(unlist(gof_1[1,]))#First row as header
+gof_1           <- gof_1[-1,]#Delete duplicate first row
+gof_1$`Intercept Only` <- as.numeric(gof_1$`Intercept Only`)#Convert to numeric so as to manage decimals
+gof_1$`Model 1 with Outliers` <- as.numeric(gof_1$`Model 1 with Outliers`)#Convert to numeric so as to manage decimals
+gof_1$`Model 1 without Outliers` <- as.numeric(gof_1$`Model 1 without Outliers`)#Convert to numeric so as to manage decimals
+rownames(gof_1) <- NULL #Delete row names
+```
+
+```{r gof1, echo=FALSE, comment=NA, message=FALSE, warning=FALSE}
+
+kable(gof_1, 
+        caption = "Goodness of Fit Model 1", 
+        format="html", 
+        table.attr="style='width:90%;'", 
+        align="lrrr", 
+        digits=2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                font_size=11,
+                full_width = FALSE)
+```
+
+### Dispersion
+
+Model 1 has very small zero-inflation rate of 1.07 (Figure \@ref(tab:gof1)). A rootogram of the fitted model shows slight overdispersion in count 1 and underdispersion in counts 4 though 6, 13, and 14 (Figure \@ref(fig:Rootogram1)). Dispersion is not significant (Pearson Chi Square test dispersion ratio =1.034, χ2=153.081, p.value=0.37) .
+
+```{r rootgramPrep1, include=FALSE}
+root1 <- countreg::rootogram(model1,  style = "hanging", main ="With Outliers")
+root1f <- countreg::rootogram(model1f,  style = "hanging", main="Without Outliers")
+```
+
+```{r Rootogram1, fig.cap="Rootogram Model 1",  fig.cap.style="Image Caption", fig.align="center", fig.show="hold", out.width="70%", results='asis', comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+autoplot(c(root1,root1f), style = "hanging")
+```
+
+```{r Dispersion1, include=FALSE}
+check_overdispersion(model1f)
+```
+
+## Model 2
+
+### Fit
+
+A negative binomial regression was performed to ascertain the effects of the friction of the roads as measured by the International Friction Index (IFI), percentage of heavy vehicles (P_HEAV) and percentage of the segment's length in an urban area (P_URB) on the number of road accidents (DV) per average daily traffic (AVG_TRAFFIC) on Portuguese road sections from highways longer than 1km between 1996 and 2002.
+
+The dataset was the same used in Model 1, that is, the original dataset without the seven identified outliers. Even though additional possible outliers - observations with standardized deviance residuals greater than 2 - were identified in Model 2 (Figure \@ref(fig:DeviancePlot2) and Table \@ref(tab:Outliers2)), removing them from the model had no significant impact in dispersion or goodness of fit measures. Hence we have not removed additional observations.
+
+All predictors were significant to the regression model at a p.value \< .01 significance level (Table \@ref(tab:anova2)).
+
+```{r Model 2, comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+model2 <- glm.nb(DV ~ offset(log(AVG_TRAFFIC))+IFI+P_HEAV+P_URB, df.filtered1)
+```
+
+```{r sumModel2,comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+sum2 <- tab_model(model2, show.r2=FALSE)
+sum2 <- mtab2df(sum2,
+  n_models = 1,
+  output = "data.frame")
+SUM2 <- kable(sum2,
+              caption = "Summary Model 2",
+              format="html",
+              table.attr="style='width:90%;'",
+              digits=2) %>%
+        kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                font_size=11, 
+                full_width = FALSE,
+                position="float_left") 
+```
+
+```{r anova2, comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+#Anova(model2f, type="III", test="Wald")
+
+l2 <- c("(Intercept)", 1, 27.08, "<0.001")
+l3 <- c("IFI", 1, 105.00, "<0.001")
+l4 <- c("P_HEAV", 1, 40.31, "<0.001")
+l5 <- c("P_URB", 1, 11.65, "<0.001")
+Anova2 <- rbind(l2, l3, l4, l5)
+rownames(Anova2) <- NULL
+colnames(Anova2) <- c(" ", "Df", "Chisq", "Pr(>Chisq)")
+ANOVA2 <- kable(Anova2, 
+        caption = "Analysis of Deviance Table (Type III tests) - Model 2", 
+        format="html", 
+        table.attr="style='width:90%;'", 
+        align="lrrr", 
+        digits=2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                font_size=11, 
+                full_width = FALSE,
+                position="float_right")
+```
+
+```{r sidebyside2, comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+kables(list(SUM2, ANOVA2)) %>% kable_styling(bootstrap_options = c("striped", "hover", "condensed"), font_size=11, full_width = FALSE, position = "float_left")
+```
+
+For every unit increase in a road segment's IFI, its rate for number of accidents per accumulated traffic was expected to decrease by a factor of 0.94, while holding all other variables in the model constant (Table \@ref(tab:sumModel2)).
+
+For every unit increase in a road segment's percentage of heavy vehicles, its rate for number of accidents per accumulated traffic was expected to decrease by a factor of 0.27, while holding all other variables in the model constant (Table \@ref(tab:sumModel2)).
+
+For every unit increase in a road section's percentage of the segment's length in an urban area, its rate for number of accidents per accumulated traffic was expected to increase by a factor of 1.01, while holding all other variables in the model constant (Table \@ref(tab:sumModel2)).
+
+```{r elasticity2, include=FALSE}
+
+meanIFI.filt1 <- mean(df.filtered1$IFI)
+meanP_HEAV.filt1 <- mean(df.filtered1$P_HEAV)
+meanP_URB.filt1 <- mean(df.filtered1$P_URB)
+meanDV.filt1 <- mean(df.filtered1$DV)
+
+e21  <- (model2$coefficients["IFI"] * 100 * meanIFI.filt1/meanDV.filt1)
+e22  <- (model2$coefficients["P_HEAV"] * 100 * meanP_HEAV.filt1/meanDV.filt1)
+e23  <- (model2$coefficients["P_URB"] * 100 * meanP_URB.filt1 /meanDV.filt1)
+
+c1 <- c("IFI", "P_HEAV", "P_URB")
+c2 <- as.numeric(c(e21, e22, e23))
+elasticity2 <- as.data.frame(cbind(c1,c2))
+elasticity2$Elasticity <- as.numeric(elasticity2$c2)
+elasticity2$c2 <- NULL
+colnames(elasticity2) <- c(" ", "Elasticity Coefficient")
+
+ELASTICITY2 <- kable(elasticity2, 
+        caption = "Elasticity Coefficients - Model 2", 
+        format="html", 
+        table.attr="style='width:90%;'", 
+        align="lrr", 
+        digits=2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                font_size=11, 
+                full_width = FALSE)
+ELASTICITY2
+```
+
+### Outliers
+
+We have identified six possible outliers, that is, observations with standardized deviance residuals greater than 2 (Figure \@ref(fig:DeviancePlot2) and Table \@ref(tab:Outliers2)).
+
+```{r DeviancePlot2, fig.cap="Standardized Deviance Residuals-Model 2",  fig.cap.style="Image Caption", fig.align="center", fig.show="hold", out.width="70%", results='asis', comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+deviance2 <- residuals(model2, type="deviance")
+dev2 <- sum(deviance2*deviance2)
+pred2 <- predict(model2, se.fit=TRUE, type="response")
+mu2 <- pred2$fit
+mu2 <- 2*sqrt(mu2)
+stdp2 <- pred2$se.fit # Std error of prediction
+variance2 <- mu2
+h2 <- stdp2 * stdp2*variance2
+sdeviance2 <- rstandard(model2) # Std dev
+plot(mu2, sdeviance2,
+     xlab="2 * sqrt mu", ylab="Standardized Deviance Residuals - Model 2",
+     main="Outliers - Model 2",
+     ylim = c(-3, 3)) 
+abline(h=2, col='red')
+abline(h=-2, col='red')
+```
+
+```{r Outliers2, comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+outliers2   <- cbind(df.filtered1, sdeviance2)
+outliers2$sdeviance2 <- abs(outliers2$sdeviance2)
+outliers2   <- cbind(rownames(outliers2), outliers2)
+setnames(outliers2, "rownames(outliers2)", "Observation")
+
+influential2a <- filter(outliers2, outliers2$sdeviance2>2)
+influential2a <- subset(influential2a, select =c( "sdeviance2", "DV", "IFI", "P_HEAV", "P_URB", "AVG_TRAFFIC", "Observation"))
+influential2a <- influential2a[order(influential2a$sdeviance2, influential2a$DV, decreasing=TRUE),]
+names(influential2a) <- c("Standardized Deviance", "Number of Accidents", "IFI", "P_HEAV", "P_URB", "AVG_TRAFFIC", "Observation")
+rownames(influential2a) <- NULL
+
+kable(influential2a, 
+        caption = "Outliers - Model 2", 
+        format="html", 
+        table.attr="style='width:70%;'", 
+        align="rrrrr", 
+        digits=4) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                font_size=11,
+                full_width = FALSE)%>%
+  column_spec(1:5, width = "2em")
+```
+
+### Goodness of Fit
+
+Model 2 has a higher Nagelkerke R^2^ than Model 1. It is, however, a poorer fit, for it has two additional predictors and it achieved a minimum reduction in the log-likelihood measures (Figure \@ref(fig:DeviancePlot2) and Table \@ref(tab:gof1)).
+
+```{r PreGoodnessFit2, include=FALSE}
+
+gof_caption2 <- c("Measure", "Intercept Only", "Model 1", "Model 2")
+
+z0f_nb          <- check_zeroinflation(interceptonly)
+z1f_nb          <- check_zeroinflation(model1f)
+z2_nb           <- check_zeroinflation(model2)
+zeroinflation2  <- c("Zero Inflation Rate", z0f_nb$ratio, z1f_nb$ratio, z2_nb$ratio)
+
+p0f_nb <- pR2(interceptonly)
+p1f_nb <- pR2(model1f)
+p2_nb <- pR2(model2)
+
+llh2  <- c("llh", p0f_nb[1], p1f_nb[1], p2_nb[1])
+
+aic0f_nb <- AIC(interceptonly)
+aic1f_nb <- AIC(model1f)
+aic2_nb<- AIC(model2)
+aic2    <- c("AIC", aic0f_nb, aic1f_nb, aic2_nb)
+
+bic0f_nb <- BIC(interceptonly)
+bic1f_nb <- BIC(model1f)
+bic2_nb<- BIC(model2)
+bic2    <- c("BIC", bic0f_nb, bic1f_nb, bic2_nb)
+
+McFadden2   <-  c("McFadden",    p0f_nb[4], p1f_nb[4], p2_nb[4])
+CoxSnell2   <-  c("Cox & Snell", p0f_nb[5], p1f_nb[5], p2_nb[5])
+Nagelkerke2 <-  c("Nagelkerke",  p0f_nb[6], p1f_nb[6], p2_nb[6])
+
+gof_2           <- data.frame(gof_caption2, zeroinflation2, llh2, aic2, bic2, McFadden2, CoxSnell2, Nagelkerke2)#Create table
+gof_2           <- t(gof_2)#Transpose
+gof_2           <- as.data.frame(gof_2)#Convert to dataframe
+names(gof_2)    <- as.character(unlist(gof_2[1,]))#First row as header
+gof_2           <- gof_2[-1,]#Delete duplicate first row
+gof_2$"Intercept Only" <- as.numeric(gof_2$"Intercept Only")
+gof_2$"Model 1" <- as.numeric(gof_2$"Model 1")
+gof_2$"Model 2" <- as.numeric(gof_2$"Model 2")
+
+rownames(gof_2) <- NULL #Delete row names
+
+```
+
+```{r gof2, echo=FALSE, comment=NA, message=FALSE, warning=FALSE}
+
+kable(gof_2, 
+        caption = "Goodness of Fit Model 2", 
+        format="html", 
+        table.attr="style='width:90%;'", 
+        align="lrrr", 
+        digits=2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                font_size=11,
+                full_width = FALSE)
+```
+
+### Dispersion
+
+The model has very small zero-inflation rate of 1.07 (Figure \@ref(tab:gof2)). A rootogram of the fitted Model 2 is very similar to that of the fitted Model 1 (Figure \@ref(fig:Rootogram2)). Dispersion is not significant (Pearson Chi Square test dispersion ratio =1.039, χ2=151.751, p.value=0.355) .
+
+```{r rootgramPrep2, include=FALSE}
+root1  <- countreg::rootogram(model1f,  style = "hanging", main ="Model 1")
+root2 <- countreg::rootogram(model2,  style = "hanging", main="Model 2")
+```
+
+```{r Rootogram2, fig.cap="Rootogram Model 2",  fig.cap.style="Image Caption", fig.align="center", fig.show="hold", out.width="70%", results='asis', comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+autoplot(c(root1,root2), style = "hanging")
+```
+
+```{r Dispersion2, include=FALSE}
+check_overdispersion(model2)
+```
+
+## Model 3
+
+### Fit
+
+A negative binomial regression was performed to ascertain the effects of average daily traffic (AVG_TRAFFIC), average speed (AVG_SPEED), percentage of segment's under the influence of intersections (P_CROSS), percentage of heavy vehicles (P_HEAV), and percentage of the segment's length in an urban area (P_URB) and longitudinal inclination class (CI) on the number of road accidents (DV) per accumulated annual average daily traffic (ACC_TRAFFIC) on Portuguese road sections from highways longer than 1km between 1996 and 2002.
+
+We have removed eleven observations with standardized deviance residuals greater than 2 (Table \@ref(tab:Outliers3)) from the dataset.
+
+The regression model was statistically significant, χ2 (6, N = 146) = 154.84, p \< .01. All predictors were significant to the model (Table \@ref(tab:anova3)).
+
+```{r Model3, include=FALSE}
+
+model3 <- glm.nb(DV ~ offset(log(ACC_TRAFFIC))+AVG_TRAFFIC+AVG_SPEED+P_CROSS+P_HEAV+P_URB+CI, df)
+
+```
+
+```{r Model3f, include=FALSE}
+
+df.filtered3 <- df[-c(69,95,90,48,60,80,46,51,26,131,153), ]
+model3f <- glm.nb(DV ~ offset(log(ACC_TRAFFIC))+AVG_TRAFFIC+AVG_SPEED+P_CROSS+P_HEAV+P_URB+CI, df.filtered3)
+
+```
+
+```{r sumModel3, comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+sum3f <- tab_model(model3f, show.r2=FALSE)
+sum3f <- mtab2df(sum3f,
+  n_models = 1,
+  output = "data.frame")
+
+SUM3 <- kable(sum3f,
+              caption = "Summary Model 3",
+              format="html",
+              table.attr="style='width:90%;'",
+              align="lrrr",
+              digits=2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                font_size=11, 
+                full_width = FALSE,
+                position="float_left") 
+```
+
+```{r omnibus3, include=FALSE}
+
+nagelkerke(model3f)
+```
+
+```{r anova3, comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+#Anova(model3f, type="III", test="Wald")
+
+l2 <- c("(Intercept)", 1, 45.0002,  "1.970e-11")
+l3 <- c("AVG_TRAFFIC", 1, 8.1896,  "0.0042131")
+l4 <- c("AVG_SPEED", 1, 62.9723,  "2.096e-15")
+l5 <- c("P_CROSS", 1, 6.1095, "0.0134461")
+l6 <- c("P_HEAV", 1, 13.8151,  "0.0002017")
+l7 <- c("P_URB", 1, 20.8124, "5.065e-06")
+l8 <- c("CI", 1, 15.2299, "9.519e-05")
+Anova3 <- rbind(l2, l3, l4, l5, l6, l7, l8)
+rownames(Anova3) <- NULL
+colnames(Anova3) <- c(" ", "Df", "Chisq", "Pr(>Chisq)")
+ANOVA3 <- kable(Anova3, 
+        caption = "Analysis of Deviance Table (Type III tests) - Model 1", 
+        format="html", 
+        table.attr="style='width:90%;'", 
+        align="lrrr", 
+        digits=2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                font_size=11, 
+                full_width = FALSE,
+                position="float_right")
+```
+
+```{r sidebyside3, comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+kables(list(SUM3, ANOVA3)) %>% kable_styling(bootstrap_options = c("striped", "hover", "condensed"), font_size=11, full_width = FALSE, position = "float_left")
+```
+
+For every unit increase in average daily traffic (AVG_TRAFFIC), a segment's rate for number of accidents per accumulated annual daily traffic was expected to increase by a factor of 1.00, while holding all other variables in the model constant (Table \@ref(tab:sumModel3)).
+
+For every unit increase in average speed (AVG_SPEED), a segment's rate for number of accidents per accumulated annual daily traffic was expected to decrease by a factor of 0.89, while holding all other variables in the model constant (Table \@ref(tab:sumModel3)).
+
+For every unit increase in the percentage of a segment's length under the influence of intersections (P_CROSS), a segment's rate for number of accidents per accumulated annual daily traffic was expected to increase by a factor of 1.85, while holding all other variables in the model constant (Table \@ref(tab:sumModel3)).
+
+For every unit increase in the percentage of heavy vehicles (P_HEAV), a segment's rate for number of accidents per accumulated annual daily traffic was expected to decrease by a factor of 0.03, while holding all other variables in the model constant (Table \@ref(tab:sumModel3)).
+
+For every unit increase in the percentage of a segment's length in urban area (P_URB), a segment's rate for number of accidents per accumulated annual daily traffic was expected to increase by a factor of 2.63, while holding all other variables in the model constant (Table \@ref(tab:sumModel3)).
+
+Segments with inclination coefficient type mix were expected to have 1.59 times the rate of number of accidents per accumulated annual daily traffic than segments with gradient only inclination coefficient, while holding all other variables in the model constant (Table \@ref(tab:sumModel3)).
+
+```{r elasticity3, include=FALSE}
+
+
+meanAVG_TRAFFIC.filt3 <- mean(df.filtered3$AVG_TRAFFIC)
+meanAVG_SPEED.filt3   <- mean(df.filtered3$AVG_SPEED)
+meanP_CROSS.filt3     <- mean(df.filtered3$P_CROSS)
+meanP_HEAV.filt3      <- mean(df.filtered3$P_HEAV)
+meanP_URB.filt3       <- mean(df.filtered3$P_URB)
+meanDV.filt3          <- mean(df.filtered3$DV)
+
+e31  <- (model3f$coefficients["AVG_TRAFFIC"] * 100 * meanAVG_TRAFFIC.filt3/meanDV.filt3)
+e32  <- (model3f$coefficients["AVG_SPEED"] * 100 * meanAVG_SPEED.filt3/meanDV.filt3)
+e33  <- (model3f$coefficients["P_CROSS"] * 100 * meanP_CROSS.filt3 /meanDV.filt3)
+e34  <- (model3f$coefficients["P_HEAV"] * 100 * meanP_HEAV.filt3 /meanDV.filt3)
+e35  <- (model3f$coefficients["P_URB"] * 100 * meanP_URB.filt3 /meanDV.filt3)
+
+c1 <- c("AVG_TRAFFIC", "AVG_SPEED", "P_CROSS", "P_HEAV", "P_URB")
+c2 <- as.numeric(c(e31, e32, e33, e34, e35))
+elasticity3 <- as.data.frame(cbind(c1,c2))
+elasticity3$Elasticity <- as.numeric(elasticity3$c2)
+elasticity3$c2 <- NULL
+colnames(elasticity3) <- c(" ", "Elasticity Coefficient")
+
+ELASTICITY3 <- kable(elasticity3, 
+        caption = "Elasticity Coefficients - Model 3", 
+        format="html", 
+        table.attr="style='width:90%;'", 
+        align="lr", 
+        digits=2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                font_size=11, 
+                full_width = FALSE)
+ELASTICITY3
+```
+
+### Outliers
+
+We have identified possible outliers to the model following Joseph Hilbe's method and code [@hilbe2011], that is, those observations whose deviance residuals are greater than 2 (Figure \@ref(fig:DeviancePlot3)). We have identified eleven observations with standardized deviance residuals greater than 2, respectively in Table \@ref(tab:Outliers3).
+
+```{r DeviancePlot3, fig.cap="Standardized Deviance Residuals-Model 3",  fig.cap.style="Image Caption", fig.align="center", fig.show="hold", out.width="70%", results='asis', comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+deviance3 <- residuals(model3, type="deviance")
+dev3 <- sum(deviance3*deviance3)
+pred3 <- predict(model3, se.fit=TRUE, type="response")
+mu3 <- pred3$fit
+mu3 <- 2*sqrt(mu3)
+stdp3 <- pred3$se.fit # Std error of prediction
+variance3 <- mu3
+h3 <- stdp3 * stdp3*variance3
+sdeviance3 <- rstandard(model3) # Std dev
+plot(mu3, sdeviance3,
+     xlab="2 * sqrt mu", ylab="Standardized Deviance Residuals - Model 3",
+     main="Outliers - Model 3",
+     ylim = c(-3, 3)) 
+abline(h=2, col='red')
+abline(h=-2, col='red')
+```
+
+```{r Outliers3, comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+outliers3   <- cbind(df, sdeviance3)
+outliers3$sdeviance3 <- abs(outliers3$sdeviance3)
+outliers3   <- cbind(rownames(outliers3), outliers3)
+setnames(outliers3, "rownames(outliers3)", "Observation")
+
+influential3a <- filter(outliers3, outliers3$sdeviance3>2)
+influential3a <- subset(influential3a, select =c( "sdeviance3", "DV", "IFI", "P_HEAV", "P_URB", "AVG_TRAFFIC", "AVG_SPEED", "CI", "ACC_TRAFFIC", "Observation"))
+influential3a <- influential3a[order(influential3a$sdeviance3, influential3a$DV, decreasing=TRUE),]
+names(influential3a) <- c("Standardized Deviance", "Number of Accidents", "IFI", "P_HEAV", "P_URB", "AVG_TRAFFIC", "AVG_SPEED", "CI", "ACC_TRAFFIC", "Observation")
+rownames(influential3a) <- NULL
+
+kable(influential3a, 
+        caption = "Outliers - Model 3", 
+        format="html", 
+        table.attr="style='width:70%;'", 
+        align="rrrrr", 
+        digits=4) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                font_size=11,
+                full_width = FALSE)%>%
+  column_spec(1:5, width = "2em")
+```
+
+### Goodness of Fit
+
+Model 3 has a Nagelkerke R^2^ of .66 (Figure \@ref(fig:DeviancePlot3) and Table \@ref(tab:gof3)).
+
+```{r PreGoodnessFit3, include=FALSE}
+
+gof_caption3 <- c("Measure", "Intercept Only", "Model 1", "Model 2", "Model 3", "Model 3f")
+
+z0_nb           <- check_zeroinflation(interceptonly)
+z1_nb           <- check_zeroinflation(model1f)
+z2_nb           <- check_zeroinflation(model2)
+z3_nb           <- check_zeroinflation(model3)
+z3f_nb          <- check_zeroinflation(model3f)
+zeroinflation3  <- c("Zero Inflation Rate", z0_nb$ratio, z1_nb$ratio, z2_nb$ratio, z3_nb$ratio, z3f_nb$ratio)
+
+p0_nb <- pR2(interceptonly)
+p1_nb <- pR2(model1f)
+p2_nb <- pR2(model2)
+p3f_nb <- pR2(model3f)
+p3_nb <- pR2(model3)
+
+llh3  <- c("llh", p0_nb[1], p1_nb[1], p2_nb[1], p3_nb[1], p3f_nb[1])
+
+aic0f_nb <- AIC(interceptonly)
+aic1f_nb <- AIC(model1f)
+aic2_nb <- AIC(model2)
+aic3f_nb <- AIC(model3f)
+aic3_nb<- AIC(model3)
+aic3    <- c("AIC", aic0_nb, aic1_nb, aic2_nb, aic3_nb, aic3f_nb)
+
+bic0f_nb <- BIC(interceptonly)
+bic1f_nb <- BIC(model1f)
+bic2_nb <- BIC(model2)
+bic3f_nb <- BIC(model3f)
+bic3_nb<- BIC(model3)
+bic3    <- c("BIC", bic0_nb, bic1_nb, bic2_nb, bic3_nb, bic3f_nb)
+
+McFadden3   <-  c("McFadden",    p0_nb[4], p1_nb[4], p2_nb[4], p3_nb[4], p3f_nb[4])
+CoxSnell3   <-  c("Cox & Snell", p0_nb[5], p1_nb[5], p2_nb[5], p3_nb[5], p3f_nb[5])
+Nagelkerke3 <-  c("Nagelkerke",  p0_nb[6], p1_nb[6], p2_nb[6], p3_nb[6], p3f_nb[6])
+
+gof_3           <- data.frame(gof_caption3, zeroinflation3, llh3, aic3, bic3, McFadden3, CoxSnell3, Nagelkerke3)#Create table
+gof_3           <- t(gof_3)#Transpose
+gof_3           <- as.data.frame(gof_3)#Convert to dataframe
+names(gof_3)    <- as.character(unlist(gof_3[1,]))#First row as header
+gof_3           <- gof_3[-1,]#Delete duplicate first row
+gof_3$`Intercept Only` <- as.numeric(gof_3$`Intercept Only`)#Convert to numeric so as to manage decimals
+gof_3$`Model 1` <- as.numeric(gof_3$`Model 1`)#Convert to numeric so as to manage decimals
+gof_3$`Model 2` <- as.numeric(gof_3$`Model 2`)#Convert to numeric so as to manage decimalsgof_3$`Model 3` <- as.numeric(gof_3$`Model 3`)#Convert to numeric so as to manage decimals
+gof_3$`Model 3` <- as.numeric(gof_3$`Model 3`)#Convert to numeric so as to manage decimals
+gof_3$`Model 3f` <- as.numeric(gof_3$`Model 3f`)#Convert to numeric so as to manage decimals
+
+rownames(gof_3) <- NULL #Delete row names
+
+```
+
+```{r gof3, echo=FALSE, comment=NA, message=FALSE, warning=FALSE}
+
+kable(gof_3, 
+        caption = "Goodness of Fit Model 3", 
+        format="html", 
+        table.attr="style='width:90%;'", 
+        align="lrrrrr", 
+        digits=2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                font_size=11,
+                full_width = FALSE)
+```
+
+### Dispersion
+
+The model has very small zero-inflation rate of 1.09 (Figure \@ref(tab:gof3)). A rootogram of the fitted model shows slight under and over dispersion (Figure \@ref(fig:Rootogram3)), but it was not found to be significant (Pearson Chi Square test dispersion ratio =1.005, χ2=139.638, p.value=0.469) .
+
+```{r rootgramPrep3, include=FALSE}
+
+root3 <- countreg::rootogram(model3,  style = "hanging", main ="With Outliers")
+root3f <- countreg::rootogram(model3f,  style = "hanging", main="Without Outliers")
+```
+
+```{r Rootogram3, fig.cap="Rootogram Model 3",  fig.cap.style="Image Caption", fig.align="center", fig.show="hold", out.width="70%", results='asis', comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+autoplot(c(root3,root3f), style = "hanging")
+```
+
+```{r Dispersion3, include=FALSE}
+check_overdispersion(model3f)
+```
+
+# Discussion
+
+All models presented herein are statistically significant.
+
+Model 1 was fitted with one single predictor - IFI. Model 2 was an attempt to improve Model 1 adding other predictors. As discussed above, Model 2 is a much poorer fit than Model 1 (Table \@ref(tab:gofSumm)). The impossibility to improve Model 1 by adding other predictors is a testament to the power of IFI as a predictor of the rate of accidents per volume of traffic.
+
+```{r PreGofSummary, include=FALSE}
+
+gof_caption3 <- c("Measure", "Intercept Only", "Model 1", "Model 2", "Model 3")
+
+z0_nb           <- check_zeroinflation(interceptonly)
+z1_nb           <- check_zeroinflation(model1f)
+z2_nb           <- check_zeroinflation(model2)
+z3f_nb          <- check_zeroinflation(model3f)
+zeroinflation3  <- c("Zero Inflation Rate", z0_nb$ratio, z1_nb$ratio, z2_nb$ratio,  z3f_nb$ratio)
+
+p0_nb <- pR2(interceptonly)
+p1_nb <- pR2(model1f)
+p2_nb <- pR2(model2)
+p3f_nb <- pR2(model3f)
+
+llh3  <- c("llh", p0_nb[1], p1_nb[1], p2_nb[1], p3f_nb[1])
+
+aic0f_nb <- AIC(interceptonly)
+aic1f_nb <- AIC(model1f)
+aic2_nb <- AIC(model2)
+aic3f_nb <- AIC(model3f)
+aic3    <- c("AIC", aic0_nb, aic1_nb, aic2_nb, aic3f_nb)
+
+bic0f_nb <- BIC(interceptonly)
+bic1f_nb <- BIC(model1f)
+bic2_nb <- BIC(model2)
+bic3f_nb <- BIC(model3f)
+bic3    <- c("BIC", bic0_nb, bic1_nb, bic2_nb,  bic3f_nb)
+
+McFadden3   <-  c("McFadden",    p0_nb[4], p1_nb[4], p2_nb[4], p3f_nb[4])
+CoxSnell3   <-  c("Cox & Snell", p0_nb[5], p1_nb[5], p2_nb[5], p3f_nb[5])
+Nagelkerke3 <-  c("Nagelkerke",  p0_nb[6], p1_nb[6], p2_nb[6], p3f_nb[6])
+
+gof_3           <- data.frame(gof_caption3, zeroinflation3, llh3, aic3, bic3, McFadden3, CoxSnell3, Nagelkerke3)#Create table
+gof_3           <- t(gof_3)#Transpose
+gof_3           <- as.data.frame(gof_3)#Convert to dataframe
+names(gof_3)    <- as.character(unlist(gof_3[1,]))#First row as header
+gof_3           <- gof_3[-1,]#Delete duplicate first row
+gof_3$`Intercept Only` <- as.numeric(gof_3$`Intercept Only`)#Convert to numeric so as to manage decimals
+gof_3$`Model 1` <- as.numeric(gof_3$`Model 1`)#Convert to numeric so as to manage decimals
+gof_3$`Model 2` <- as.numeric(gof_3$`Model 2`)#Convert to numeric so as to manage decimalsgof_3$`Model 3` <- as.numeric(gof_3$`Model 3`)#Convert to numeric so as to manage decimals
+gof_3$`Model 3` <- as.numeric(gof_3$`Model 3`)#Convert to numeric so as to manage decimals
+
+rownames(gof_3) <- NULL #Delete row names
+```
+
+```{r gofSumm, echo=FALSE, comment=NA, message=FALSE, warning=FALSE}
+
+kable(gof_3, 
+        caption = "Summary Goodness of Fit Measures", 
+        format="html", 
+        table.attr="style='width:90%;'", 
+        align="lrrrrr", 
+        digits=2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                font_size=11,
+                full_width = FALSE)
+```
+
+Removing IFI from the dataset, we were able to fit Model 3 with 6 predictors. Model 3 has a significantly higher Nagelkerke R^2^ and significantly lower AIC and BIC values than Model 1 (Table \@ref(tab:gofSumm)).
+
+```{r plotSumm, fig.cap="Models 1 and 2 Plot",  fig.cap.style="Image Caption", fig.align="center", fig.show="hold", out.width="70%", results='asis', comment=NA, echo=FALSE, message=FALSE, warning=FALSE}
+
+grid.arrange(
+plot_model(model1f),
+NULL,
+plot_model(model3f),
+ncol=3,
+widths=c(1,0.1,1))
+```
+
+Models 1 and 3 are different perspectives of the road accident phenomenon. They are both equally adequate to represent the accident rate phenomenon. The choice of one over the other will depend on the point of view of the analysis rather than on their goodness of fit measures. Model 1 explains the rate of accidents per traffic volume as a function of friction. Model 3, on the other hand, explains it as a function of predictors that affect driver's behavior.
+
+In Model 1, in addition to its own effects, the IFI acts as a proxy of 3 of the 6 predictors included in Model 2. To understand that, we have to remember that IFI is strongy correlated with average speed (Spearman Correlation Rate = .66, p.value\<.01). In fact, maximum speed of any given road is set based on skid resistance, among other factors. But that goes to say that both the IFI and AVG_SPEED mirror similar driving environments. IFI is also correlated with percentage of urban segments P_URB (Spearman Correlation Rate = -.45, p.value\<.01), which, in its turn, is correlated with AVG_SPEED(Spearman Correlation Rate = -.47, p.value\<.01). Finally, IFI is correlated with P_CROSS (Spearman Correlation Rate = -.30, p.value\<.01),
+
+We have used traffic volume as an offset variable in the models. But traffic does not simply increases exposure to accidents: traffic itself increases accident risk by increasing the chances of recognition errors, as we have discussed in the introduction.
+
+Most coefficients in Model 3 are consistent with our a priori knowledge of the accident phenomenon. We expected urban segments and segments with higher percentage of intersections to have a higher rate of accidents. Also, segments with mixed inclination coefficients (CI) have higher accident rate than segments with only gradient. This is because inclination brings particular danger when it hides possible hazards from sight, as discussed in the introduction.
+
+Two coefficients merit lengthier analysis: P_HEAV and AVG_SPEED. As to P_HEAV, according to literature review, there isno literature on accident rate differences of slower vehicles [@aarts2006]. AVG_TRAFFIC is significantly and moderately correlated with P_HEAV (Spearman Correlation Rate = -.30, p.value\<.01), that is, segments with more heavy vehicles are associated with less traffic, but that should not impact the model because the dependent variable is the rate of accidents per traffic volume. One possible explanation to this finding is that an increased quantity of heavy vehicles forces the driver to slow down his decision making process and be more alert. Driving among an increased quantity of high vehicles traps the driver in a slow motion scenario.
+
+The analysis of the AVG_SPEED coefficient is more nuanced. According to Model 3, an increase in average speed is associated with a reduction in the rate of accidents per traffic volume. Literature is to the effect, however, that, at any given segment, higher average speeds are associated with higher accident rates. Our findings seem to contradict this, but, in fact, they do not. Our findings are related to the entire dataset comprised of roads with lower and higher average speed, more or less inserted in urban areas. Literature findings are related to increase of average speed in a given segment. As we have discussed in the introduction, speed affects accident rates differently in segments with different characteristics. Accident rates increase faster with an increase of speed at roads designed for lower speed than at roads designed for higher speed [@aarts2006].
+
+It is noteworthy that we have not found precipitation to be significant predictors of the rate of accidents. As we have discussed in Cluster Analysis, [@capote2009] has found similar results and suggested that lower accident rates are explained by familiarity of drivers of rainy areas with the prevalent weather conditions.
+
+Finally, we have not found curves to be a significant predictor of the rate of accidents. This may be explained because the variable is a measure of the length of curve in the segment. As we have discussed in the introduction, curves do have an impact on accident rates, but it is not straightforward. A study of the curve effect on accident rates would need predictors with more relevant specifications.
+
+# Conclusion
+
+In this HA, we present a procedure aimed at identifying the relationships between roadway accident frequency and a variety of explanatory variables. Using a Negative Binomial (NB) regression model, a form that is theoretically justified, to identify the log-linear relationship between accident estimation and roadway features. The main goal of this work was to become familiar with generalized models as we tried to stipulate the impact of a set of variables on the estimation of road accidents.
+
+Previous research has shown that many roadway features, particularly those available to us, are strongly associated with roadway accidents. Specifically, traffic volume [@cafiso2018], roadway type [@agent1974], terrain/grade [@dong2018], type of road [@lu2015], speed limit ( [@dong2018], [@mal2008]), and presence of on-ramps/off-ramps ([@che2013], [@lafla2022]), have all been linked to roadway accidents.
+
+Based on our most significant models (Model 1 and Model 3) we can draw some relevant considerations. From Model 1, we can conclude that IFI itself, is significant at estimating the dependent variable, an increase in IFI will lead to a decrease in the rate of accidents per traffic volume. The IFI construction incorporated macrotexture measurements with side‐force, fixed‐slip, and locked‐wheel friction measurements, to recognize the previously identified dependence of friction on speed and texture [@wam1995]. This relationship emphasizes the need and importance of maintaining the road network, particularly the roads. Of all the factors that pavement should exhibit to provide a safe ride, friction and/or texture depth of the surface is paramount to controlling and reducing highway accidents ([@fuen2011]; [@yeaman2005]).
+
+From Model 3, it is possible to emphasize that driving behavior and all factors that influence it are important contributors to road accidents. In our a priori consideration we already expected this influence. It is widely accepted that driving is a complex task that requires cooperation among cognition, decision making, and physical control to ensure road safety. Road safety involves a number of different aspects, including road infrastructure (e.g., surface conditions), road user behaviors (e.g., driver/pedestrian behavior), and traffic congestion [@soh2023]. [@lafla2020] recognize that 'human error' plays an important role in roadway accidents, despite their effects cannot be detected directly, they can be quantified indirectly. By assuming that in the presence of certain roadways features the probability of the human error occur is higher, so accidents will occur more frequently. Thus, the explanatory variables of roadways features can be considered as catalysts, in some way, for human error.
+
+# References

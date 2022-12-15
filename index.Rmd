@@ -1,0 +1,15 @@
+--- 
+title:"Road Accidents in Portuguese Highways"
+subtitle: "Multiple Linear Regression Model"
+author:
+"Julianno Amorim", "Fabiana Peixoto de Mello"
+date: "`r Sys.Date()`"
+site: bookdown::bookdown_site
+documentclass: book
+bibliography: "references.bib"
+biblio-style: apalike
+link-citations: yes
+always_allow_html: yes
+
+---
+

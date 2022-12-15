@@ -1,0 +1,16 @@
+bookdown::gitbook:
+  css: assets/style.css
+  highlight: tango
+  config:
+    toc:
+      depth: 4
+      collapse: section
+      before: |
+        <li class="toc-logo"><a href="./"><img src="assets/images/Tecnico_logo.svg"></a></li>
+        <p class="toc-course">TRANSPORT DEMAND MODELLING</p>
+        <p class="toc-title">Road Accidents in Portuguese Highways</p>
+        <p class="toc-author">Julianno Amorim</p>
+        <p class="toc-author">Fabiana Peixoto de Mello</p>
+      after: |
+
+    download: ["rmd"]
